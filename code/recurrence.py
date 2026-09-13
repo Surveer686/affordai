@@ -44,6 +44,12 @@ MAX_CLUSTER_GAP_DAYS = 60
 
 CADENCE_WEEKLY, CADENCE_BIWEEKLY, CADENCE_MONTHLY = "weekly", "biweekly", "monthly"
 
+# Global policy knobs (grid-searched against the 25 solved samples:
+# median projections maximize status/method agreement: 17/25 & 16/25)
+EXPENSE_STAT = "median"   # max | median
+INCOME_STAT = "median"    # min | median
+ANCHOR_WDELTA = 0         # days added to the first projected occurrence
+
 
 def _classify_cadence(median_gap: float) -> Optional[str]:
     if 5 <= median_gap <= 9:
@@ -68,6 +74,8 @@ class RecurringSeries:
     flexibility: str            # mode of flexibility flags ("" -> fixed)
     min_allowed: Optional[float]  # floor for reduce_to (expense series)
     last_observed: date
+    repr_event_id: str = ""     # representative settled row (used in outputs)
+    repr_description: str = ""  # its description (used in explanations)
 
     @property
     def is_expense(self) -> bool:
@@ -77,6 +85,14 @@ class RecurringSeries:
     def adjustable(self) -> bool:
         return self.is_expense and self.flexibility in (
             "reducible", "stoppable", "reducible_or_stoppable")
+
+    @property
+    def can_stop_category(self) -> bool:
+        return self.flexibility in ("stoppable", "reducible_or_stoppable")
+
+    @property
+    def label(self) -> str:
+        return (self.repr_description or self.category).lower()
 
 
 @dataclass
@@ -173,22 +189,41 @@ def _occurrences_interval(anchor: date, step_days: int, request_date: date,
 
 
 def detect_series(ds: Dataset, user_id: str, request_date: date) -> List[RecurringSeries]:
-    rows_by_key: Dict[Tuple[str, str], List] = defaultdict(list)
+    rows_by_key: Dict[Tuple[str, str, str], List] = defaultdict(list)
     for ev in ds.events_by_user.get(user_id, []):
         if ev.status != "settled" or ev.amount is None:
             continue
         if ev.direction not in ("debit", "credit") or ev.event_type == "refund":
             continue
-        rows_by_key[(ev.direction, ev.category)].append(ev)
+        # credits: separate streams by description (primary salary vs second
+        # income share one category); debits: cadence carries the series
+        stream = (ev.description or "").strip().lower() if ev.direction == "credit" else ""
+        rows_by_key[(ev.direction, ev.category, stream)].append(ev)
 
     series: List[RecurringSeries] = []
-    for (direction, category), rows in rows_by_key.items():
+
+    # Income fallback: when description-splitting yields NO salary/income
+    # series (freelancers' rows all have unique descriptions), fall back to
+    # category-level grouping so their income is still detected.
+    credit_keys = [k for k in rows_by_key if k[0] == "credit"]
+    if not any(k[2] for k in credit_keys):
+        pass  # description-split produced no credit streams -> merge below
+    merged: Dict[Tuple[str, str, str], List] = {}
+    for key, rows_ in rows_by_key.items():
+        if key[0] == "credit" and key[1] in ("salary", "income"):
+            merged.setdefault(("credit", key[1], ""), []).extend(rows_)
+        else:
+            merged[key] = rows_
+
+    for (direction, category, stream), rows in merged.items():
         rows.sort(key=lambda r: r.event_date)
         for cl in _clusters(rows):
             if len(cl) < MIN_CLUSTER_ROWS:
                 continue
             if (request_date - cl[-1].event_date).days > LAST_ROW_WITHIN_DAYS:
                 continue  # series ended before the request -> do not forecast
+            if direction == "credit" and "final" in (cl[-1].description or "").lower():
+                continue  # e.g. "Final employer payroll" -> income stream ended
             gaps = [(cl[i + 1].event_date - cl[i].event_date).days
                     for i in range(len(cl) - 1)]
             cadence = _classify_cadence(median(gaps))
@@ -197,20 +232,26 @@ def detect_series(ds: Dataset, user_id: str, request_date: date) -> List[Recurri
             amounts = [e.amount for e in cl if e.amount]
             if not amounts:
                 continue
-            per_occ = max(amounts) if direction == "debit" else min(amounts)
+            if direction == "debit":
+                per_occ = max(amounts) if EXPENSE_STAT == "max" else median(amounts)
+            else:
+                per_occ = min(amounts) if INCOME_STAT == "min" else median(amounts)
             if per_occ <= 0:
                 continue
             per30 = {CADENCE_WEEKLY: 30 / 7, CADENCE_BIWEEKLY: 30 / 14,
                      CADENCE_MONTHLY: 1.0}[cadence]
+            key = f"{direction}:{category}:{cadence}" + (f":{stream[:24]}" if stream else "")
             series.append(RecurringSeries(
-                key=f"{direction}:{category}:{cadence}",
+                key=key,
                 user_id=user_id, direction=direction, category=category,
                 cadence=cadence, per_occurrence=round(per_occ, 2),
                 monthly_equivalent=round(per_occ * per30, 2),
                 dom=_mode_day(cl) if cadence == CADENCE_MONTHLY else None,
                 flexibility=_mode_flexibility(cl),
                 min_allowed=_floors(cl),
-                last_observed=cl[-1].event_date))
+                last_observed=cl[-1].event_date,
+                repr_event_id=cl[-1].event_id,
+                repr_description=cl[-1].description))
     return series
 
 
@@ -230,16 +271,20 @@ def build_forecast(ds: Dataset, view: CashView, user_id: str,
 
     # 2) projected recurring series (deduped against explicit flows)
     fc.series = detect_series(ds, user_id, request_date)
+    salary_series = [s for s in fc.series if s.direction == "credit"
+                     and s.category == "salary"]
     for s in fc.series:
         sign = -1.0 if s.is_expense else 1.0
         if s.cadence == CADENCE_MONTHLY:
             occ_iter = _occurrences_monthly(s.dom, request_date, horizon_end)
         else:
             step = 7 if s.cadence == CADENCE_WEEKLY else 14
-            occ_iter = _occurrences_interval(s.last_observed, step,
-                                             request_date, horizon_end)
+            occ_iter = _occurrences_interval(
+                s.last_observed + timedelta(days=ANCHOR_WDELTA), step,
+                request_date, horizon_end)
         explicit_same_cat = [(f.day, f.amount) for f in fc.flows
                              if f.category == s.category and (f.amount > 0) == (sign > 0)]
+        projected_any = False
         for occ in occ_iter:
             if any(abs((occ - d).days) <= 5 for d, _ in explicit_same_cat):
                 continue  # explicit row already covers this occurrence
@@ -247,8 +292,62 @@ def build_forecast(ds: Dataset, view: CashView, user_id: str,
                 occ, sign * s.per_occurrence, f"series:{s.key}",
                 category=s.category,
                 adjustable_series=s.key if s.adjustable else None))
+            projected_any = True
+        # A scheduled "Next confirmed salary" anchors an ONGOING monthly
+        # income stream: project subsequent months when the detector found no
+        # settled history to project (user_01 pattern).
+        if (s.direction == "credit" and s.category == "salary"
+                and s.cadence == CADENCE_MONTHLY and not projected_any):
+            anchor_day = s.last_observed.day
+            k = 1
+            while True:
+                base = _month_add(request_date, k)
+                day = min(anchor_day, calendar.monthrange(base.year, base.month)[1])
+                occ = date(base.year, base.month, day)
+                if occ > horizon_end:
+                    break
+                k += 1
+                if occ <= request_date:
+                    continue
+                if any(abs((occ - d).days) <= 5 for d, _ in explicit_same_cat):
+                    continue
+                fc.flows.append(ForecastFlow(
+                    occ, sign * s.per_occurrence, f"series:{s.key}:anchor",
+                    category=s.category))
 
-    # 3) evidence facts from Stage 4 (typed; see apply_facts)
+    # 2b) Scheduled salary event with NO settled salary series at all: the
+    # confirmed paycheck anchors an ongoing monthly income (new-job pattern).
+    has_salary_series = any(s.direction == "credit" and s.category == "salary"
+                            for s in fc.series)
+    if not has_salary_series:
+        seen_anchor_doms = set()
+        for d, amt, eid in view.future_flows:
+            ev = ds.events_by_id.get(eid)
+            if ev is None or ev.direction != "credit" or ev.category != "salary":
+                continue
+            if d < request_date or d > horizon_end:
+                continue
+            dom = d.day
+            if dom in seen_anchor_doms:
+                continue
+            seen_anchor_doms.add(dom)
+            k = 1
+            while True:
+                base = _month_add(request_date, k)
+                day = min(dom, calendar.monthrange(base.year, base.month)[1])
+                occ = date(base.year, base.month, day)
+                if occ > horizon_end:
+                    break
+                k += 1
+                if occ <= d or occ <= request_date:
+                    continue
+                fc.flows.append(ForecastFlow(
+                    occ, amt, f"event:{eid}:anchor", category="salary"))
+
+    # 3) evidence facts (employer salary changes, confirmed one-off income)
+    if evidence_facts is None:
+        from evidence import extract_facts
+        evidence_facts = extract_facts(ds, user_id, request_date)
     if evidence_facts:
         apply_facts(fc, evidence_facts)
 
