@@ -227,6 +227,7 @@ class Dataset:
     messages_by_user: Dict[str, List[Message]]
     messages_by_request: Dict[str, List[Message]]
     messages_by_event: Dict[str, List[Message]]
+    images: List[ImageRef]
     images_by_id: Dict[str, ImageRef]
     images_by_user: Dict[str, List[ImageRef]]
     images_by_request: Dict[str, List[ImageRef]]
@@ -441,6 +442,7 @@ def load_dataset(dataset_dir: str) -> Dataset:
         messages_by_user=messages_by_user,
         messages_by_request=messages_by_request,
         messages_by_event=messages_by_event,
+        images=images,
         images_by_id=images_by_id,
         images_by_user=images_by_user,
         images_by_request=images_by_request,

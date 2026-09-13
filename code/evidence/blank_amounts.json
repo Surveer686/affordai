@@ -1,0 +1,19 @@
+{
+  "_comment": "Amounts for the 16 financial_events rows with blank `amount`, extracted from the related receipt/invoice image in dataset/media/images/. Derived from evidence documents, not invented. event_1700's image is physically cut off below the Item Bill row; the visible Item Bill total is used (the missing row is a ~16 INR delivery fee).",
+  "event_253":  {"image_id": "image_01", "amount": 4365000.0, "currency": "IDR", "note": "Payslip Net Pay IDR 4,365,000 (net salary, not gross 4,780,800)"},
+  "event_1442": {"image_id": "image_02", "amount": 100000.0,  "currency": "INR", "note": "Rent receipt Balance Due 1,00,000 (outstanding part; total 2,00,000, received 1,00,000)"},
+  "event_1545": {"image_id": "image_03", "amount": 41272.0,   "currency": "INR", "note": "Invoice Net Amount INR 41,272"},
+  "event_1700": {"image_id": "image_04", "amount": 2854.0,    "currency": "INR", "note": "Delivery-app order Item Bill INR 2,854.00; image cut off below (delivery fee ~16 not visible)"},
+  "event_1786": {"image_id": "image_05", "amount": 704.05,    "currency": "INR", "note": "Telecom bill Amount due till 06-Feb-2026 = 704.05"},
+  "event_3051": {"image_id": "image_06", "amount": 1995.0,    "currency": "INR", "note": "Grocery invoice Total 1995.00 (Amount in Words matches)"},
+  "event_3231": {"image_id": "image_07", "amount": 8528.0,    "currency": "INR", "note": "Restaurant tax invoice Grand Total RS 8528"},
+  "event_4535": {"image_id": "image_08", "amount": 15339.0,   "currency": "INR", "note": "Maintenance receipt Total 15,339.00 (13,880+1,050+409)"},
+  "event_5170": {"image_id": "image_09", "amount": 723.0,     "currency": "INR", "note": "Water bill Total 723.00"},
+  "event_6033": {"image_id": "image_10", "amount": 79679.26,  "currency": "INR", "note": "Grocery tax invoice Total = Balance Due 79,679.26"},
+  "event_6859": {"image_id": "image_11", "amount": 3650.0,    "currency": "INR", "note": "Hospital bill Total = Amount Payable = Balance 3,650.00"},
+  "event_7307": {"image_id": "image_12", "amount": 33.5,      "currency": "USD", "note": "Taxi receipt Total USD 33.50 (cash paid 40 is not the fare)"},
+  "event_7941": {"image_id": "image_13", "amount": 2298.0,    "currency": "INR", "note": "Merchant order Total paid INR 2,298.00"},
+  "event_9421": {"image_id": "image_14", "amount": 4593.0,    "currency": "INR", "note": "Handwritten pharmacy bill TOTAL 4,593.00"},
+  "event_9806": {"image_id": "image_15", "amount": 9968.0,    "currency": "INR", "note": "Airline GST invoice Grand Total 9,968.00"},
+  "event_10521":{"image_id": "image_16", "amount": 393.22,    "currency": "INR", "note": "EV charging invoice Total 393.22 (333.24 + CGST 29.99 + SGST 29.99)"}
+}
