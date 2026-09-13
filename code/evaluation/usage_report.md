@@ -34,7 +34,7 @@ reproducible and free.
 ## Development-time model usage (not part of the final run)
 
 During development we used an assistant coding agent (GLM, Z.ai) via the
-Codebuff/Freebuff environment for code authoring and image reading of the 16
+Codebuff environment for code authoring and image reading of the 16
 receipts. Those tokens are conversation overhead, not part of the solution's
 inference path, and are therefore excluded from the per-request accounting
 above per the report's scope ("the final full-dataset run that produced
